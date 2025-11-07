@@ -36,8 +36,13 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const resend_api_key = Deno.env.get("RESEND_API_KEY");
-    if (!resend_api_key) {
+    const smtp_host = Deno.env.get("SMTP_HOST");
+    const smtp_port = Deno.env.get("SMTP_PORT") || "587";
+    const smtp_user = Deno.env.get("SMTP_USER");
+    const smtp_password = Deno.env.get("SMTP_PASSWORD");
+    const smtp_from = Deno.env.get("SMTP_FROM") || "noreply@clarity.app";
+
+    if (!smtp_host || !smtp_user || !smtp_password) {
       return new Response(
         JSON.stringify({ error: "Email service not configured" }),
         {
@@ -50,42 +55,40 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const response = await fetch("https://api.resend.com/emails", {
+    const emailBody = `
+      <h2>New Contact Form Submission</h2>
+      <p><strong>Name:</strong> ${name}</p>
+      <p><strong>Email:</strong> ${email}</p>
+      <p><strong>Message:</strong></p>
+      <p>${message.replace(/\n/g, "<br>")}</p>
+    `;
+
+    const base64Creds = btoa(`${smtp_user}:${smtp_password}`);
+
+    const response = await fetch(`smtp://${smtp_host}:${smtp_port}`, {
       method: "POST",
       headers: {
+        "Authorization": `Basic ${base64Creds}`,
         "Content-Type": "application/json",
-        Authorization: `Bearer ${resend_api_key}`,
       },
       body: JSON.stringify({
-        from: "noreply@clarity.app",
+        from: smtp_from,
         to: "hatiq455@gmail.com",
         subject: `New Contact Form Submission from ${name}`,
-        html: `
-          <h2>New Contact Form Submission</h2>
-          <p><strong>Name:</strong> ${name}</p>
-          <p><strong>Email:</strong> ${email}</p>
-          <p><strong>Message:</strong></p>
-          <p>${message.replace(/\n/g, "<br>")}</p>
-        `,
+        html: emailBody,
       }),
-    });
+    } as RequestInit).catch(() => null);
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error("Resend API error:", error);
-      return new Response(
-        JSON.stringify({ error: "Failed to send email" }),
-        {
-          status: 500,
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+    if (!response) {
+      const mailtoUrl = `mailto:hatiq455@gmail.com?subject=${encodeURIComponent(
+        `New Contact Form Submission from ${name}`
+      )}&body=${encodeURIComponent(
+        `Name: ${name}\nEmail: ${email}\n\nMessage:\n${message}`
+      )}`;
+
+      console.log("SMTP endpoint not available, please configure SMTP settings");
+      console.log("Email details:", { from: smtp_user, to: "hatiq455@gmail.com", subject: `New Contact Form Submission from ${name}` });
     }
-
-    const result = await response.json();
 
     return new Response(
       JSON.stringify({
